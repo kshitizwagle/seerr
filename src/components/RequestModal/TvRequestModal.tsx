@@ -32,7 +32,7 @@ import type { QuotaResponse } from '@server/interfaces/api/userInterfaces';
 import { Permission } from '@server/lib/permissions';
 import type { SeasonWithEpisodes, TvDetails } from '@server/models/Tv';
 import axios from 'axios';
-import { Fragment, useState } from 'react';
+import { Fragment, useRef, useState } from 'react';
 import { useIntl } from 'react-intl';
 import useSWR, { mutate } from 'swr';
 
@@ -126,7 +126,11 @@ const EpisodeSelection = ({
 }: EpisodeSelectionProps) => {
   const intl = useIntl();
   const { data } = useSWR<SeasonWithEpisodes>(
-    `/api/v1/tv/${tmdbId}/season/${seasonNumber}?is4k=${is4k}`
+    `/api/v1/tv/${tmdbId}/season/${seasonNumber}?is4k=${is4k}`,
+    {
+      revalidateOnMount: true,
+      refreshInterval: 15000,
+    }
   );
 
   if (!data) {
@@ -215,7 +219,9 @@ const TvRequestModal = ({
   const editingSeasons: number[] = (editRequest?.seasons ?? []).map(
     (season) => season.seasonNumber
   );
-  const { data, error } = useSWR<TvDetails>(`/api/v1/tv/${tmdbId}`);
+  const { data, error } = useSWR<TvDetails>(`/api/v1/tv/${tmdbId}`, {
+    revalidateOnMount: true,
+  });
   const [requestOverrides, setRequestOverrides] =
     useState<RequestOverrides | null>(null);
   const [selectedSeasons, setSelectedSeasons] = useState<number[]>(
@@ -228,6 +234,23 @@ const TvRequestModal = ({
   >(() =>
     getEpisodeSelectionMap(editRequest?.seasons ?? initialSeasonEpisodes)
   );
+  const openSeason = useRef<{
+    seasonNumber: number;
+    close: (focusableElement?: HTMLElement) => void;
+  } | null>(null);
+  const toggleSeasonDisclosure = (
+    seasonNumber: number,
+    isOpen: boolean,
+    close: (focusableElement?: HTMLElement) => void,
+    focusableElement: HTMLElement
+  ) => {
+    if (isOpen) {
+      openSeason.current = null;
+    } else {
+      openSeason.current?.close(focusableElement);
+      openSeason.current = { seasonNumber, close };
+    }
+  };
   const intl = useIntl();
   const { user, hasPermission } = useUser();
   const [searchModal, setSearchModal] = useState<{
@@ -870,7 +893,7 @@ const TvRequestModal = ({
 
                       return (
                         <Disclosure as={Fragment} key={`season-${season.id}`}>
-                          {({ open }) => (
+                          {({ open, close }) => (
                             <>
                               <tr>
                                 <td
@@ -923,94 +946,108 @@ const TvRequestModal = ({
                                   </span>
                                 </td>
                                 <td className="whitespace-nowrap px-1 py-4 text-sm font-medium leading-5 text-gray-100 md:px-6">
-                                  <DisclosureButton
-                                    disabled={
-                                      !settings.currentSettings
-                                        .partialRequestsEnabled
-                                    }
-                                    className="flex w-full items-center justify-between space-x-2 text-left disabled:cursor-default"
-                                    aria-label={intl.formatMessage(
-                                      messages.expandSeason,
-                                      {
-                                        season:
-                                          season.seasonNumber === 0
-                                            ? intl.formatMessage(
-                                                globalMessages.specials
-                                              )
-                                            : intl.formatMessage(
-                                                messages.seasonnumber,
-                                                { number: season.seasonNumber }
-                                              ),
-                                      }
-                                    )}
-                                  >
-                                    <span>
-                                      {season.seasonNumber === 0
-                                        ? intl.formatMessage(
-                                            globalMessages.specials
-                                          )
-                                        : intl.formatMessage(
-                                            messages.seasonnumber,
-                                            { number: season.seasonNumber }
-                                          )}
-                                    </span>
-                                    <ChevronDownIcon
-                                      className={`h-5 w-5 text-gray-500 transition-transform duration-200 ease-in-out motion-reduce:transition-none ${
-                                        open ? 'rotate-180' : ''
-                                      }`}
-                                    />
-                                  </DisclosureButton>
+                                  <span>
+                                    {season.seasonNumber === 0
+                                      ? intl.formatMessage(
+                                          globalMessages.specials
+                                        )
+                                      : intl.formatMessage(
+                                          messages.seasonnumber,
+                                          { number: season.seasonNumber }
+                                        )}
+                                  </span>
                                 </td>
                                 <td className="whitespace-nowrap px-5 py-4 text-sm leading-5 text-gray-200 md:px-6">
                                   {season.episodeCount}
                                 </td>
                                 <td className="whitespace-nowrap py-4 pr-2 text-sm leading-5 text-gray-200 md:px-6">
-                                  {!seasonRequest && !mediaSeason && (
-                                    <Badge>
-                                      {intl.formatMessage(
-                                        globalMessages.notrequested
+                                  <div className="flex min-w-0 items-center justify-between gap-2">
+                                    <div className="flex flex-wrap items-center gap-1">
+                                      {!seasonRequest && !mediaSeason && (
+                                        <Badge>
+                                          {intl.formatMessage(
+                                            globalMessages.notrequested
+                                          )}
+                                        </Badge>
                                       )}
-                                    </Badge>
-                                  )}
-                                  {!mediaSeason &&
-                                    seasonRequest?.status ===
-                                      MediaRequestStatus.PENDING && (
-                                      <Badge badgeType="warning">
-                                        {intl.formatMessage(
-                                          globalMessages.pending
+                                      {!mediaSeason &&
+                                        seasonRequest?.status ===
+                                          MediaRequestStatus.PENDING && (
+                                          <Badge badgeType="warning">
+                                            {intl.formatMessage(
+                                              globalMessages.pending
+                                            )}
+                                          </Badge>
                                         )}
-                                      </Badge>
-                                    )}
-                                  {((!mediaSeason &&
-                                    seasonRequest?.status ===
-                                      MediaRequestStatus.APPROVED) ||
-                                    mediaSeason?.[
-                                      is4k ? 'status4k' : 'status'
-                                    ] === MediaStatus.PROCESSING) && (
-                                    <Badge badgeType="primary">
-                                      {intl.formatMessage(
-                                        globalMessages.requested
+                                      {((!mediaSeason &&
+                                        seasonRequest?.status ===
+                                          MediaRequestStatus.APPROVED) ||
+                                        mediaSeason?.[
+                                          is4k ? 'status4k' : 'status'
+                                        ] === MediaStatus.PROCESSING) && (
+                                        <Badge badgeType="primary">
+                                          {intl.formatMessage(
+                                            globalMessages.requested
+                                          )}
+                                        </Badge>
                                       )}
-                                    </Badge>
-                                  )}
-                                  {mediaSeason?.[
-                                    is4k ? 'status4k' : 'status'
-                                  ] === MediaStatus.PARTIALLY_AVAILABLE && (
-                                    <Badge badgeType="success">
-                                      {intl.formatMessage(
-                                        globalMessages.partiallyavailable
+                                      {mediaSeason?.[
+                                        is4k ? 'status4k' : 'status'
+                                      ] === MediaStatus.PARTIALLY_AVAILABLE && (
+                                        <Badge badgeType="success">
+                                          {intl.formatMessage(
+                                            globalMessages.partiallyavailable
+                                          )}
+                                        </Badge>
                                       )}
-                                    </Badge>
-                                  )}
-                                  {mediaSeason?.[
-                                    is4k ? 'status4k' : 'status'
-                                  ] === MediaStatus.AVAILABLE && (
-                                    <Badge badgeType="success">
-                                      {intl.formatMessage(
-                                        globalMessages.available
+                                      {mediaSeason?.[
+                                        is4k ? 'status4k' : 'status'
+                                      ] === MediaStatus.AVAILABLE && (
+                                        <Badge badgeType="success">
+                                          {intl.formatMessage(
+                                            globalMessages.available
+                                          )}
+                                        </Badge>
                                       )}
-                                    </Badge>
-                                  )}
+                                    </div>
+                                    <DisclosureButton
+                                      disabled={
+                                        !settings.currentSettings
+                                          .partialRequestsEnabled
+                                      }
+                                      onClick={(event) =>
+                                        toggleSeasonDisclosure(
+                                          season.seasonNumber,
+                                          open,
+                                          close,
+                                          event.currentTarget
+                                        )
+                                      }
+                                      className="ml-auto flex shrink-0 items-center rounded p-1 text-left text-gray-500 transition-colors hover:text-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:cursor-default"
+                                      aria-label={intl.formatMessage(
+                                        messages.expandSeason,
+                                        {
+                                          season:
+                                            season.seasonNumber === 0
+                                              ? intl.formatMessage(
+                                                  globalMessages.specials
+                                                )
+                                              : intl.formatMessage(
+                                                  messages.seasonnumber,
+                                                  {
+                                                    number: season.seasonNumber,
+                                                  }
+                                                ),
+                                        }
+                                      )}
+                                    >
+                                      <ChevronDownIcon
+                                        className={`h-5 w-5 transition-transform duration-200 ease-in-out motion-reduce:transition-none ${
+                                          open ? 'rotate-180' : ''
+                                        }`}
+                                      />
+                                    </DisclosureButton>
+                                  </div>
                                 </td>
                               </tr>
                               <DisclosurePanel

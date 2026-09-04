@@ -35,7 +35,11 @@ const Season = ({
 }: SeasonProps) => {
   const intl = useIntl();
   const { data, error } = useSWR<SeasonWithEpisodes>(
-    `/api/v1/tv/${tvId}/season/${seasonNumber}${is4k ? '?is4k=true' : ''}`
+    `/api/v1/tv/${tvId}/season/${seasonNumber}${is4k ? '?is4k=true' : ''}`,
+    {
+      revalidateOnMount: true,
+      refreshInterval: 15000,
+    }
   );
 
   if (!data && !error) {
