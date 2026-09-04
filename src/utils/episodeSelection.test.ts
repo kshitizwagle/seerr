@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import {
+  findEpisodeDownload,
+  getDownloadProgress,
   getRecentEpisodeNumbers,
   isEpisodeSelected,
   serializeSeasonEpisodes,
@@ -42,5 +44,51 @@ describe('episode selection helpers', () => {
       }),
       true
     );
+  });
+
+  it('marks available and downloading episodes as selected', () => {
+    assert.strictEqual(
+      isEpisodeSelected({
+        episodeNumber: 1,
+        selectedEpisodeNumbers: [],
+        allSelected: false,
+        requested: false,
+        available: true,
+      }),
+      true
+    );
+    assert.strictEqual(
+      isEpisodeSelected({
+        episodeNumber: 2,
+        selectedEpisodeNumbers: [],
+        allSelected: false,
+        requested: false,
+        downloading: true,
+      }),
+      true
+    );
+  });
+
+  it('finds a download for an exact season and episode', () => {
+    const download = {
+      externalId: 47,
+      episode: {
+        seasonNumber: 1,
+        episodeNumber: 2,
+        absoluteEpisodeNumber: 2,
+        id: 102,
+      },
+    } as Parameters<typeof findEpisodeDownload>[0][number];
+
+    assert.strictEqual(findEpisodeDownload([download], 1, 2), download);
+    assert.strictEqual(findEpisodeDownload([download], 2, 2), undefined);
+  });
+
+  it('returns clamped download progress without NaN', () => {
+    assert.strictEqual(getDownloadProgress({ size: 100, sizeLeft: 25 }), 75);
+    assert.strictEqual(getDownloadProgress({ size: 0, sizeLeft: 0 }), 0);
+    assert.strictEqual(getDownloadProgress(undefined), 0);
+    assert.strictEqual(getDownloadProgress({ size: 100, sizeLeft: 150 }), 0);
+    assert.strictEqual(getDownloadProgress({ size: 100, sizeLeft: -10 }), 100);
   });
 });

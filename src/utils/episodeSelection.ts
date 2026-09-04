@@ -1,3 +1,4 @@
+import type { DownloadingItem } from '@server/lib/downloadtracker';
 import type { Episode } from '@server/models/Tv';
 
 export type SeasonEpisodeSelection = {
@@ -10,13 +11,54 @@ export const isEpisodeSelected = ({
   selectedEpisodeNumbers,
   allSelected,
   requested,
+  available = false,
+  downloading = false,
 }: {
   episodeNumber: number;
   selectedEpisodeNumbers: number[];
   allSelected: boolean;
   requested: boolean;
+  available?: boolean;
+  downloading?: boolean;
 }): boolean =>
-  allSelected || requested || selectedEpisodeNumbers.includes(episodeNumber);
+  allSelected ||
+  requested ||
+  available ||
+  downloading ||
+  selectedEpisodeNumbers.includes(episodeNumber);
+
+export const findEpisodeDownload = (
+  downloads: DownloadingItem[],
+  seasonNumber: number,
+  episodeNumber: number
+): DownloadingItem | undefined =>
+  downloads.find(
+    (download) =>
+      download.episode?.seasonNumber === seasonNumber &&
+      download.episode?.episodeNumber === episodeNumber
+  );
+
+export const getDownloadProgress = (
+  download?: Partial<Pick<DownloadingItem, 'size' | 'sizeLeft'>> | null
+): number => {
+  const size = download?.size;
+  const sizeLeft = download?.sizeLeft;
+
+  if (
+    typeof size !== 'number' ||
+    typeof sizeLeft !== 'number' ||
+    !Number.isFinite(size) ||
+    !Number.isFinite(sizeLeft) ||
+    size <= 0
+  ) {
+    return 0;
+  }
+
+  return Math.min(
+    100,
+    Math.max(0, Math.round(((size - sizeLeft) / size) * 100))
+  );
+};
 
 export const isRecentEpisode = (
   airDate: string | null,
