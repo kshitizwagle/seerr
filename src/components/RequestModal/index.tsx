@@ -1,6 +1,7 @@
 import CollectionRequestModal from '@app/components/RequestModal/CollectionRequestModal';
 import MovieRequestModal from '@app/components/RequestModal/MovieRequestModal';
 import TvRequestModal from '@app/components/RequestModal/TvRequestModal';
+import type { SeasonEpisodeSelection } from '@app/utils/episodeSelection';
 import { Transition } from '@headlessui/react';
 import type { MediaStatus } from '@server/constants/media';
 import type { MediaRequest } from '@server/entity/MediaRequest';
@@ -15,6 +16,7 @@ interface RequestModalProps {
   onComplete?: (newStatus: MediaStatus) => void;
   onCancel?: () => void;
   onUpdating?: (isUpdating: boolean) => void;
+  initialSeasonEpisodes?: SeasonEpisodeSelection[];
 }
 
 const RequestModal = ({
@@ -26,6 +28,7 @@ const RequestModal = ({
   onComplete,
   onUpdating,
   onCancel,
+  initialSeasonEpisodes,
 }: RequestModalProps) => {
   return (
     <Transition
@@ -55,6 +58,7 @@ const RequestModal = ({
           onUpdating={onUpdating}
           is4k={is4k}
           editRequest={editRequest}
+          initialSeasonEpisodes={initialSeasonEpisodes}
         />
       ) : (
         <CollectionRequestModal

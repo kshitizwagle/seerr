@@ -1,6 +1,9 @@
 import TheMovieDb from '@server/api/themoviedb';
 import { ANIME_KEYWORD_ID } from '@server/api/themoviedb/constants';
-import type { TmdbKeyword } from '@server/api/themoviedb/interfaces';
+import type {
+  TmdbKeyword,
+  TmdbTvSeasonResult,
+} from '@server/api/themoviedb/interfaces';
 import {
   MediaRequestStatus,
   MediaStatus,
@@ -36,8 +39,124 @@ import { User } from './User';
 export class RequestPermissionError extends Error {}
 export class QuotaRestrictedError extends Error {}
 export class DuplicateMediaRequestError extends Error {}
+export class InvalidMediaRequestError extends Error {}
 export class NoSeasonsAvailableError extends Error {}
 export class BlocklistedMediaError extends Error {}
+
+export type SeasonSelection = {
+  seasonNumber: number;
+  episodeNumbers: number[] | null;
+};
+
+type SeasonSelectionLike = {
+  seasonNumber: number;
+  episodeNumbers?: number[] | null;
+};
+
+export function seasonRequestsOverlap(
+  first: SeasonSelectionLike,
+  second: SeasonSelectionLike
+): boolean {
+  if (first.seasonNumber !== second.seasonNumber) {
+    return false;
+  }
+
+  return (
+    first.episodeNumbers == null ||
+    second.episodeNumbers == null ||
+    first.episodeNumbers.some((episode) =>
+      second.episodeNumbers?.includes(episode)
+    )
+  );
+}
+
+export function getSeasonSelections(
+  requestBody: MediaRequestBody,
+  tmdbSeasons: TmdbTvSeasonResult[],
+  enableSpecialEpisodes: boolean
+): SeasonSelection[] {
+  let seasonNumbers: number[];
+
+  if (requestBody.seasons === 'all') {
+    seasonNumbers = tmdbSeasons
+      .filter((season) => season.season_number !== 0)
+      .map((season) => season.season_number);
+  } else if (requestBody.seasons === undefined) {
+    seasonNumbers = [];
+  } else if (Array.isArray(requestBody.seasons)) {
+    seasonNumbers = requestBody.seasons;
+  } else {
+    throw new InvalidMediaRequestError('Invalid seasons selection.');
+  }
+
+  if (
+    seasonNumbers.some((seasonNumber) => !Number.isSafeInteger(seasonNumber))
+  ) {
+    throw new InvalidMediaRequestError('Invalid season number.');
+  }
+
+  const selectedEpisodes = new Map<number, number[]>();
+  if (requestBody.seasonEpisodes !== undefined) {
+    if (!Array.isArray(requestBody.seasonEpisodes)) {
+      throw new InvalidMediaRequestError('Invalid episode selection.');
+    }
+
+    for (const selection of requestBody.seasonEpisodes) {
+      if (
+        !selection ||
+        !Number.isSafeInteger(selection.seasonNumber) ||
+        !Array.isArray(selection.episodeNumbers) ||
+        selection.episodeNumbers.length === 0 ||
+        selectedEpisodes.has(selection.seasonNumber)
+      ) {
+        throw new InvalidMediaRequestError('Invalid episode selection.');
+      }
+
+      const episodeNumbers = [...selection.episodeNumbers].sort(
+        (a, b) => a - b
+      );
+      if (
+        episodeNumbers.some(
+          (episodeNumber, index) =>
+            !Number.isSafeInteger(episodeNumber) ||
+            episodeNumber < 1 ||
+            episodeNumbers[index - 1] === episodeNumber
+        )
+      ) {
+        throw new InvalidMediaRequestError('Invalid episode number.');
+      }
+
+      const season = tmdbSeasons.find(
+        (tmdbSeason) => tmdbSeason.season_number === selection.seasonNumber
+      );
+      if (!season) {
+        throw new InvalidMediaRequestError(
+          `Season ${selection.seasonNumber} was not found in TMDB metadata.`
+        );
+      }
+      if (
+        episodeNumbers.some(
+          (episodeNumber) => episodeNumber > season.episode_count
+        )
+      ) {
+        throw new InvalidMediaRequestError(
+          `Episode number is outside the available episodes for season ${selection.seasonNumber}.`
+        );
+      }
+
+      selectedEpisodes.set(selection.seasonNumber, episodeNumbers);
+    }
+  }
+
+  seasonNumbers = [
+    ...new Set([...seasonNumbers, ...selectedEpisodes.keys()]),
+  ].filter((seasonNumber) => enableSpecialEpisodes || seasonNumber > 0);
+
+  return seasonNumbers.map((seasonNumber) => ({
+    seasonNumber,
+    episodeNumbers: selectedEpisodes.get(seasonNumber) ?? null,
+  }));
+}
 
 type MediaRequestOptions = {
   isAutoRequest?: boolean;
@@ -430,56 +549,48 @@ export class MediaRequest {
       const tmdbMediaShow = tmdbMedia as Awaited<
         ReturnType<typeof tmdb.getTvShow>
       >;
-      let requestedSeasons =
-        requestBody.seasons === 'all'
-          ? tmdbMediaShow.seasons
-              .filter((season) => season.season_number !== 0)
-              .map((season) => season.season_number)
-          : (requestBody.seasons as number[]);
-      if (!settings.main.enableSpecialEpisodes) {
-        requestedSeasons = requestedSeasons.filter((sn) => sn > 0);
-      }
+      const requestedSeasons = getSeasonSelections(
+        requestBody,
+        tmdbMediaShow.seasons,
+        settings.main.enableSpecialEpisodes
+      );
 
-      let existingSeasons: number[] = [];
+      let existingSeasonRequests: SeasonSelection[] = [];
 
       // We need to check existing requests on this title to make sure we don't double up on seasons that were
       // already requested. In the case they were, we just throw out any duplicates but still approve the request.
       // (Unless there are no seasons, in which case we abort)
       if (media.requests) {
-        existingSeasons = media.requests
+        existingSeasonRequests = media.requests
           .filter(
             (request) =>
               request.is4k === requestBody.is4k &&
               request.status !== MediaRequestStatus.DECLINED &&
               request.status !== MediaRequestStatus.COMPLETED
           )
-          .reduce((seasons, request) => {
-            const combinedSeasons = request.seasons.map(
-              (season) => season.seasonNumber
-            );
-
-            return [...seasons, ...combinedSeasons];
-          }, [] as number[]);
+          .flatMap((request) => request.seasons);
       }
 
       // We should also check seasons that are available/partially available but don't have existing requests
-      if (media.seasons) {
-        existingSeasons = [
-          ...existingSeasons,
-          ...media.seasons
-            .filter(
-              (season) =>
-                season[requestBody.is4k ? 'status4k' : 'status'] !==
-                  MediaStatus.UNKNOWN &&
-                season[requestBody.is4k ? 'status4k' : 'status'] !==
-                  MediaStatus.DELETED
-            )
-            .map((season) => season.seasonNumber),
-        ];
-      }
+      const unavailableSeasons = new Set(
+        media.seasons
+          ?.filter(
+            (season) =>
+              season[requestBody.is4k ? 'status4k' : 'status'] !==
+                MediaStatus.UNKNOWN &&
+              season[requestBody.is4k ? 'status4k' : 'status'] !==
+                MediaStatus.DELETED
+          )
+          .map((season) => season.seasonNumber)
+      );
 
       const finalSeasons = requestedSeasons.filter(
-        (rs) => !existingSeasons.includes(rs)
+        (selection) =>
+          !existingSeasonRequests.some((existing) =>
+            seasonRequestsOverlap(selection, existing)
+          ) &&
+          (selection.episodeNumbers !== null ||
+            !unavailableSeasons.has(selection.seasonNumber))
       );
 
       if (finalSeasons.length === 0) {
@@ -534,9 +645,10 @@ export class MediaRequest {
         languageProfileId: requestBody.languageProfileId,
         tags: tags,
         seasons: finalSeasons.map(
-          (sn) =>
+          ({ seasonNumber, episodeNumbers }) =>
             new SeasonRequest({
-              seasonNumber: sn,
+              seasonNumber,
+              episodeNumbers,
               status: user.hasPermission(
                 [
                   requestBody.is4k

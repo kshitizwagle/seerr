@@ -34,6 +34,10 @@ import globalMessages from '@app/i18n/globalMessages';
 import ErrorPage from '@app/pages/_error';
 import { sortCrewPriority } from '@app/utils/creditHelpers';
 import defineMessages from '@app/utils/defineMessages';
+import {
+  serializeSeasonEpisodes,
+  type SeasonEpisodeSelection,
+} from '@app/utils/episodeSelection';
 import { refreshIntervalHelper } from '@app/utils/refreshIntervalHelper';
 import {
   Disclosure,
@@ -123,6 +127,9 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
   const intl = useIntl();
   const { locale } = useLocale();
   const [showRequestModal, setShowRequestModal] = useState(false);
+  const [selectedEpisodes, setSelectedEpisodes] = useState<
+    Record<number, number[]>
+  >({});
   const [showManager, setShowManager] = useState(false);
   const [showIssueModal, setShowIssueModal] = useState(false);
   const [isUpdating, setIsUpdating] = useState<boolean>(false);
@@ -335,6 +342,32 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
 
   const is4kComplete = isSeasonSetComplete(true);
 
+  const canSelectEpisodes =
+    settings.currentSettings.partialRequestsEnabled &&
+    hasPermission([Permission.REQUEST, Permission.REQUEST_TV], {
+      type: 'or',
+    });
+  const selectedSeasonEpisodes: SeasonEpisodeSelection[] =
+    serializeSeasonEpisodes(selectedEpisodes);
+
+  const toggleEpisode = (seasonNumber: number, episodeNumber: number) => {
+    setSelectedEpisodes((episodes) => {
+      const current = episodes[seasonNumber] ?? [];
+      const nextNumbers = current.includes(episodeNumber)
+        ? current.filter((number) => number !== episodeNumber)
+        : [...current, episodeNumber];
+      const next = { ...episodes };
+
+      if (nextNumbers.length === 0) {
+        delete next[seasonNumber];
+      } else {
+        next[seasonNumber] = nextNumbers.sort((a, b) => a - b);
+      }
+
+      return next;
+    });
+  };
+
   const streamingRegion = user?.settings?.streamingRegion
     ? user.settings.streamingRegion
     : settings.currentSettings.streamingRegion
@@ -528,6 +561,7 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
         type="tv"
         onComplete={() => {
           revalidate();
+          setSelectedEpisodes({});
           setShowRequestModal(false);
         }}
         onCancel={() => setShowRequestModal(false)}
@@ -681,11 +715,15 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
           </div>
           <RequestButton
             mediaType="tv"
-            onUpdate={() => revalidate()}
+            onUpdate={() => {
+              revalidate();
+              setSelectedEpisodes({});
+            }}
             tmdbId={data?.id}
             media={data?.mediaInfo}
             isShowComplete={isComplete}
             is4kShowComplete={is4kComplete}
+            initialSeasonEpisodes={selectedSeasonEpisodes}
           />
           {(data.mediaInfo?.status === MediaStatus.AVAILABLE ||
             data.mediaInfo?.status === MediaStatus.PARTIALLY_AVAILABLE ||
@@ -1097,6 +1135,16 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
                             <Season
                               tvId={data.id}
                               seasonNumber={season.seasonNumber}
+                              selectable={canSelectEpisodes}
+                              selectedEpisodeNumbers={
+                                selectedEpisodes[season.seasonNumber] ?? []
+                              }
+                              onToggleEpisode={(episodeNumber) =>
+                                toggleEpisode(
+                                  season.seasonNumber,
+                                  episodeNumber
+                                )
+                              }
                             />
                           </DisclosurePanel>
                         </Transition>

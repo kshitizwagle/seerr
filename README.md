@@ -13,6 +13,10 @@
 
 **Seerr** is a free and open source software application for managing requests for your media library. It integrates with the media server of your choice: [Jellyfin](https://jellyfin.org), [Plex](https://plex.tv), and [Emby](https://emby.media/). In addition, it integrates with your existing services, such as **[Sonarr](https://sonarr.tv/)**, **[Radarr](https://radarr.video/)**.
 
+## About This Fork
+
+This repository is a personal fork of [Seerr](https://github.com/seerr-team/seerr). It currently focuses on episode-level TV requests: selecting individual episodes or recent episodes instead of whole seasons, with season accordions and episode metadata.
+
 ## Current Features
 
 - Full Jellyfin/Emby/Plex integration including authentication with user import & management.

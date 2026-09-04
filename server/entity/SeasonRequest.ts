@@ -18,6 +18,9 @@ class SeasonRequest {
   @Column()
   public seasonNumber: number;
 
+  @Column({ type: 'simple-json', nullable: true })
+  public episodeNumbers: number[] | null;
+
   @Column({ type: 'int', default: MediaRequestStatus.PENDING })
   public status: MediaRequestStatus;
 

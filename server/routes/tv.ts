@@ -1,15 +1,21 @@
 import { getMetadataProvider } from '@server/api/metadata';
 import RottenTomatoes from '@server/api/rating/rottentomatoes';
+import SonarrAPI from '@server/api/servarr/sonarr';
 import TheMovieDb from '@server/api/themoviedb';
 import { ANIME_KEYWORD_ID } from '@server/api/themoviedb/constants';
 import type { TmdbKeyword } from '@server/api/themoviedb/interfaces';
-import { MediaType } from '@server/constants/media';
+import { MediaRequestStatus, MediaType } from '@server/constants/media';
 import { getRepository } from '@server/datasource';
 import Media from '@server/entity/Media';
 import { Watchlist } from '@server/entity/Watchlist';
+import { getSettings } from '@server/lib/settings';
 import logger from '@server/logger';
 import { mapTvResult } from '@server/models/Search';
-import { mapSeasonWithEpisodes, mapTvDetails } from '@server/models/Tv';
+import {
+  mapEpisodeStatuses,
+  mapSeasonWithEpisodes,
+  mapTvDetails,
+} from '@server/models/Tv';
 import { Router } from 'express';
 
 const tvRoutes = Router();
@@ -84,7 +90,66 @@ tvRoutes.get('/:id/season/:seasonNumber', async (req, res, next) => {
       language: (req.query.language as string) ?? req.locale,
     });
 
-    return res.status(200).json(mapSeasonWithEpisodes(season));
+    const is4k = String(req.query.is4k) === 'true';
+    const data = mapSeasonWithEpisodes(season);
+    const media = await Media.getMedia(Number(req.params.id), MediaType.TV);
+    const mediaSeason = media?.seasons.find(
+      (mediaSeason) =>
+        mediaSeason.seasonNumber === Number(req.params.seasonNumber)
+    );
+    data.status = mediaSeason?.[is4k ? 'status4k' : 'status'];
+
+    const serviceId = is4k ? media?.serviceId4k : media?.serviceId;
+    const seriesId = is4k
+      ? media?.externalServiceId4k
+      : media?.externalServiceId;
+    const sonarrSettings = getSettings().sonarr.find(
+      (sonarr) => sonarr.id === serviceId
+    );
+
+    if (sonarrSettings && seriesId) {
+      try {
+        const sonarr = new SonarrAPI({
+          apiKey: sonarrSettings.apiKey,
+          url: SonarrAPI.buildUrl(sonarrSettings, '/api/v3'),
+        });
+        const sonarrEpisodes = await sonarr.getEpisodes(seriesId);
+        const requestedSelections = (media?.requests ?? [])
+          .filter(
+            (request) =>
+              request.is4k === is4k &&
+              request.status !== MediaRequestStatus.DECLINED &&
+              request.status !== MediaRequestStatus.COMPLETED
+          )
+          .flatMap((request) =>
+            request.seasons
+              .filter(
+                (seasonRequest) =>
+                  seasonRequest.status !== MediaRequestStatus.DECLINED &&
+                  seasonRequest.status !== MediaRequestStatus.COMPLETED
+              )
+              .map((seasonRequest) => ({
+                seasonNumber: seasonRequest.seasonNumber,
+                episodeNumbers: seasonRequest.episodeNumbers,
+              }))
+          );
+
+        data.episodes = mapEpisodeStatuses(
+          data.episodes,
+          sonarrEpisodes,
+          requestedSelections
+        );
+      } catch (e) {
+        logger.debug('Unable to retrieve Sonarr episode status', {
+          label: 'API',
+          errorMessage: e.message,
+          tvId: req.params.id,
+          seasonNumber: req.params.seasonNumber,
+        });
+      }
+    }
+
+    return res.status(200).json(data);
   } catch (e) {
     logger.debug('Something went wrong retrieving season', {
       label: 'API',

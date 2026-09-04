@@ -4,6 +4,7 @@ import useSettings from '@app/hooks/useSettings';
 import { Permission, useUser } from '@app/hooks/useUser';
 import globalMessages from '@app/i18n/globalMessages';
 import defineMessages from '@app/utils/defineMessages';
+import type { SeasonEpisodeSelection } from '@app/utils/episodeSelection';
 import { ArrowDownTrayIcon } from '@heroicons/react/24/outline';
 import {
   CheckIcon,
@@ -51,6 +52,7 @@ interface RequestButtonProps {
   media?: Media;
   isShowComplete?: boolean;
   is4kShowComplete?: boolean;
+  initialSeasonEpisodes?: SeasonEpisodeSelection[];
 }
 
 const RequestButton = ({
@@ -60,6 +62,7 @@ const RequestButton = ({
   mediaType,
   isShowComplete = false,
   is4kShowComplete = false,
+  initialSeasonEpisodes,
 }: RequestButtonProps) => {
   const intl = useIntl();
   const settings = useSettings();
@@ -373,6 +376,7 @@ const RequestButton = ({
         show={showRequestModal}
         type={mediaType}
         editRequest={editRequest ? activeRequest : undefined}
+        initialSeasonEpisodes={initialSeasonEpisodes}
         onComplete={() => {
           onUpdate();
           setShowRequestModal(false);
@@ -385,6 +389,7 @@ const RequestButton = ({
         type={mediaType}
         editRequest={editRequest ? active4kRequest : undefined}
         is4k
+        initialSeasonEpisodes={initialSeasonEpisodes}
         onComplete={() => {
           onUpdate();
           setShowRequest4kModal(false);

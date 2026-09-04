@@ -80,6 +80,16 @@ function fakeTmdbShow(tmdbId: number): TmdbTvDetails {
     original_language: 'en',
     keywords: { results: [] },
     external_ids: {},
+    seasons: [
+      {
+        id: 1,
+        air_date: '2025-01-01',
+        episode_count: 3,
+        name: 'Season 1',
+        overview: '',
+        season_number: 1,
+      },
+    ],
   } as unknown as TmdbTvDetails;
 }
 
@@ -404,6 +414,145 @@ describe('PUT /request/:requestId (tv)', () => {
     assert.deepStrictEqual(
       otherSaved.seasons.map((s) => s.seasonNumber),
       [3]
+    );
+  });
+
+  it('updates a pending season request without overlapping another partial request', async () => {
+    const userRepo = getRepository(User);
+    const mediaRepo = getRepository(Media);
+    const requestRepo = getRepository(MediaRequest);
+    const admin = await userRepo.findOneOrFail({
+      where: { email: 'admin@seerr.dev' },
+    });
+    const otherUser = await userRepo.findOneOrFail({
+      where: { email: 'friend@seerr.dev' },
+    });
+    const media = await mediaRepo.save(
+      new Media({
+        mediaType: MediaType.TV,
+        tmdbId: 67901,
+        status: MediaStatus.PENDING,
+        status4k: MediaStatus.UNKNOWN,
+      })
+    );
+
+    const first = await requestRepo.save(
+      new MediaRequest({
+        type: MediaType.TV,
+        status: MediaRequestStatus.PENDING,
+        media,
+        requestedBy: admin,
+        is4k: false,
+        seasons: [
+          new SeasonRequest({
+            seasonNumber: 1,
+            status: MediaRequestStatus.PENDING,
+            ...({ episodeNumbers: [1] } as object),
+          }),
+        ],
+      })
+    );
+    await requestRepo.save(
+      new MediaRequest({
+        type: MediaType.TV,
+        status: MediaRequestStatus.PENDING,
+        media,
+        requestedBy: otherUser,
+        is4k: false,
+        seasons: [
+          new SeasonRequest({
+            seasonNumber: 1,
+            status: MediaRequestStatus.PENDING,
+            ...({ episodeNumbers: [3] } as object),
+          }),
+        ],
+      })
+    );
+
+    const agent = await loginAs('admin@seerr.dev', 'test1234');
+    const res = await agent.put(`/request/${first.id}`).send({
+      mediaType: MediaType.TV,
+      seasons: [1],
+      seasonEpisodes: [{ seasonNumber: 1, episodeNumbers: [2] }],
+    });
+
+    assert.strictEqual(res.status, 200);
+    const saved = await requestRepo.findOneOrFail({
+      where: { id: first.id },
+    });
+    assert.deepStrictEqual(
+      (saved.seasons[0] as unknown as { episodeNumbers?: number[] })
+        .episodeNumbers,
+      [2]
+    );
+  });
+
+  it('does not edit a pending season request into an overlapping partial request', async () => {
+    const userRepo = getRepository(User);
+    const mediaRepo = getRepository(Media);
+    const requestRepo = getRepository(MediaRequest);
+    const admin = await userRepo.findOneOrFail({
+      where: { email: 'admin@seerr.dev' },
+    });
+    const otherUser = await userRepo.findOneOrFail({
+      where: { email: 'friend@seerr.dev' },
+    });
+    const media = await mediaRepo.save(
+      new Media({
+        mediaType: MediaType.TV,
+        tmdbId: 67902,
+        status: MediaStatus.PENDING,
+        status4k: MediaStatus.UNKNOWN,
+      })
+    );
+    const first = await requestRepo.save(
+      new MediaRequest({
+        type: MediaType.TV,
+        status: MediaRequestStatus.PENDING,
+        media,
+        requestedBy: admin,
+        is4k: false,
+        seasons: [
+          new SeasonRequest({
+            seasonNumber: 1,
+            status: MediaRequestStatus.PENDING,
+            ...({ episodeNumbers: [1] } as object),
+          }),
+        ],
+      })
+    );
+    await requestRepo.save(
+      new MediaRequest({
+        type: MediaType.TV,
+        status: MediaRequestStatus.PENDING,
+        media,
+        requestedBy: otherUser,
+        is4k: false,
+        seasons: [
+          new SeasonRequest({
+            seasonNumber: 1,
+            status: MediaRequestStatus.PENDING,
+            ...({ episodeNumbers: [3] } as object),
+          }),
+        ],
+      })
+    );
+
+    const agent = await loginAs('admin@seerr.dev', 'test1234');
+    const res = await agent.put(`/request/${first.id}`).send({
+      mediaType: MediaType.TV,
+      seasons: [1],
+      seasonEpisodes: [{ seasonNumber: 1, episodeNumbers: [3] }],
+    });
+
+    assert.strictEqual(res.status, 202);
+    const saved = await requestRepo.findOneOrFail({
+      where: { id: first.id },
+    });
+    assert.deepStrictEqual(
+      (saved.seasons[0] as unknown as { episodeNumbers?: number[] })
+        .episodeNumbers,
+      [1]
     );
   });
 });

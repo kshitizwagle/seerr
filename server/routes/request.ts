@@ -1,5 +1,6 @@
 import RadarrAPI from '@server/api/servarr/radarr';
 import SonarrAPI from '@server/api/servarr/sonarr';
+import TheMovieDb from '@server/api/themoviedb';
 import {
   MediaRequestStatus,
   MediaStatus,
@@ -10,10 +11,13 @@ import Media from '@server/entity/Media';
 import {
   BlocklistedMediaError,
   DuplicateMediaRequestError,
+  InvalidMediaRequestError,
   MediaRequest,
   NoSeasonsAvailableError,
   QuotaRestrictedError,
   RequestPermissionError,
+  getSeasonSelections,
+  seasonRequestsOverlap,
 } from '@server/entity/MediaRequest';
 import SeasonRequest from '@server/entity/SeasonRequest';
 import { User } from '@server/entity/User';
@@ -322,6 +326,8 @@ requestRoutes.post<never, MediaRequest, MediaRequestBody>(
         case RequestPermissionError:
         case QuotaRestrictedError:
           return next({ status: 403, message: error.message });
+        case InvalidMediaRequestError:
+          return next({ status: 400, message: error.message });
         case DuplicateMediaRequestError:
           return next({ status: 409, message: error.message });
         case NoSeasonsAvailableError:
@@ -529,13 +535,16 @@ requestRoutes.put<{ requestId: string }>(
         request.tags = req.body.tags;
         request.requestedBy = requestUser as User;
 
-        const requestedSeasons = req.body.seasons as number[] | undefined;
-
-        if (!requestedSeasons || requestedSeasons.length === 0) {
-          throw new Error(
-            'Missing seasons. If you want to cancel a series request, use the DELETE method.'
-          );
-        }
+        const requestBody = req.body as MediaRequestBody;
+        const tmdb = new TheMovieDb();
+        const tmdbMediaShow = await tmdb.getTvShow({
+          tvId: request.media.tmdbId,
+        });
+        const requestedSeasons = getSeasonSelections(
+          requestBody,
+          tmdbMediaShow.seasons,
+          getSettings().main.enableSpecialEpisodes
+        );
 
         // Get existing media so we can work with all the requests
         const media = await mediaRepository.findOneOrFail({
@@ -544,7 +553,7 @@ requestRoutes.put<{ requestId: string }>(
         });
 
         // Get all requested seasons that are not part of this request we are editing
-        const existingSeasons = media.requests
+        const existingSeasonRequests = media.requests
           .filter(
             (r) =>
               r.is4k === request.is4k &&
@@ -552,16 +561,13 @@ requestRoutes.put<{ requestId: string }>(
               r.status !== MediaRequestStatus.DECLINED &&
               r.status !== MediaRequestStatus.COMPLETED
           )
-          .reduce((seasons, r) => {
-            const combinedSeasons = r.seasons.map(
-              (season) => season.seasonNumber
-            );
-
-            return [...seasons, ...combinedSeasons];
-          }, [] as number[]);
+          .flatMap((r) => r.seasons);
 
         const filteredSeasons = requestedSeasons.filter(
-          (rs) => !existingSeasons.includes(rs)
+          (selection) =>
+            !existingSeasonRequests.some((existing) =>
+              seasonRequestsOverlap(selection, existing)
+            )
         );
 
         if (filteredSeasons.length === 0) {
@@ -571,28 +577,42 @@ requestRoutes.put<{ requestId: string }>(
           });
         }
 
-        const newSeasons = filteredSeasons.filter(
-          (sn) => !request.seasons.map((s) => s.seasonNumber).includes(sn)
+        const existingRequestSeasons = new Map(
+          request.seasons.map((season) => [season.seasonNumber, season])
+        );
+        const nextSeasons = filteredSeasons.map(
+          ({ seasonNumber, episodeNumbers }) =>
+            existingRequestSeasons.get(seasonNumber) ??
+            new SeasonRequest({
+              seasonNumber,
+              episodeNumbers,
+              status: MediaRequestStatus.PENDING,
+            })
+        );
+        const newSeasons = nextSeasons.filter(
+          (season) => !existingRequestSeasons.has(season.seasonNumber)
+        );
+        const removedSeasons = request.seasons.filter(
+          (season) => !nextSeasons.includes(season)
         );
 
-        request.seasons = request.seasons.filter((rs) =>
-          filteredSeasons.includes(rs.seasonNumber)
-        );
+        if (removedSeasons.length > 0) {
+          await getRepository(SeasonRequest).remove(removedSeasons);
+        }
+
+        request.seasons = nextSeasons;
+        for (const season of filteredSeasons) {
+          const existing = existingRequestSeasons.get(season.seasonNumber);
+          if (existing) {
+            existing.episodeNumbers = season.episodeNumbers;
+          }
+        }
 
         if (newSeasons.length > 0) {
           logger.debug('Adding new seasons to request', {
             label: 'Media Request',
-            newSeasons,
+            newSeasons: newSeasons.map((season) => season.seasonNumber),
           });
-          request.seasons.push(
-            ...newSeasons.map(
-              (ns) =>
-                new SeasonRequest({
-                  seasonNumber: ns,
-                  status: MediaRequestStatus.PENDING,
-                })
-            )
-          );
         }
 
         await requestRepository.save(request);
@@ -600,6 +620,9 @@ requestRoutes.put<{ requestId: string }>(
 
       return res.status(200).json(request);
     } catch (e) {
+      if (e instanceof InvalidMediaRequestError) {
+        return next({ status: 400, message: e.message });
+      }
       next({ status: 500, message: e.message });
     }
   }

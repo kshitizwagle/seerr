@@ -1057,6 +1057,9 @@ components:
           nullable: true
         episodeNumber:
           type: number
+        finaleType:
+          type: string
+          nullable: true
         overview:
           type: string
         productionCode:
@@ -7069,6 +7072,13 @@ paths:
           schema:
             type: string
             example: en
+        - in: query
+          name: is4k
+          description: Whether to retrieve status from the 4K service instance
+          required: false
+          example: false
+          schema:
+            type: boolean
       responses:
         '200':
           description: TV details

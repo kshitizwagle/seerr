@@ -6,6 +6,7 @@ import type {
   TmdbTvRatingResult,
   TmdbTvSeasonResult,
 } from '@server/api/themoviedb/interfaces';
+import type { MediaStatus } from '@server/constants/media';
 import type Media from '@server/entity/Media';
 import type { Video } from './Movie';
 import type {
@@ -26,11 +27,18 @@ import {
   mapWatchProviders,
 } from './common';
 
-interface Episode {
+export interface EpisodeStatus {
+  requested: boolean;
+  available: boolean;
+  monitored: boolean;
+}
+
+export interface Episode {
   id: number;
   name: string;
   airDate: string | null;
   episodeNumber: number;
+  finaleType?: string;
   overview: string;
   productionCode: string;
   seasonNumber: number;
@@ -38,6 +46,7 @@ interface Episode {
   stillPath?: string;
   voteAverage: number;
   voteCount: number;
+  status?: EpisodeStatus;
 }
 
 interface Season {
@@ -53,7 +62,21 @@ interface Season {
 export interface SeasonWithEpisodes extends Omit<Season, 'episodeCount'> {
   episodes: Episode[];
   externalIds: ExternalIds;
+  status?: MediaStatus;
 }
+
+export type EpisodeStatusSelection = {
+  seasonNumber: number;
+  episodeNumbers?: number[] | null;
+};
+
+export type SonarrEpisodeStatus = {
+  seasonNumber: number;
+  episodeNumber: number;
+  hasFile: boolean;
+  finaleType?: string;
+  monitored: boolean;
+};
 
 interface SpokenLanguage {
   englishName: string;
@@ -150,6 +173,33 @@ export const mapSeasonWithEpisodes = (
   seasonNumber: season.season_number,
   posterPath: season.poster_path,
 });
+
+export const mapEpisodeStatuses = (
+  episodes: Episode[],
+  sonarrEpisodes: SonarrEpisodeStatus[],
+  requestedSelections: EpisodeStatusSelection[]
+): Episode[] =>
+  episodes.map((episode) => {
+    const sonarrEpisode = sonarrEpisodes.find(
+      (candidate) =>
+        candidate.seasonNumber === episode.seasonNumber &&
+        candidate.episodeNumber === episode.episodeNumber
+    );
+    return {
+      ...episode,
+      finaleType: sonarrEpisode?.finaleType ?? episode.finaleType,
+      status: {
+        requested: requestedSelections.some(
+          (selection) =>
+            selection.seasonNumber === episode.seasonNumber &&
+            (selection.episodeNumbers == null ||
+              selection.episodeNumbers.includes(episode.episodeNumber))
+        ),
+        available: sonarrEpisode?.hasFile ?? false,
+        monitored: sonarrEpisode?.monitored ?? false,
+      },
+    };
+  });
 
 export const mapNetwork = (network: TmdbNetwork): TvNetwork => ({
   id: network.id,
