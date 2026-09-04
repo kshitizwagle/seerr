@@ -1,13 +1,15 @@
 import AirDateBadge from '@app/components/AirDateBadge';
+import Badge from '@app/components/Common/Badge';
 import CachedImage from '@app/components/Common/CachedImage';
 import LoadingSpinner from '@app/components/Common/LoadingSpinner';
+import globalMessages from '@app/i18n/globalMessages';
 import defineMessages from '@app/utils/defineMessages';
 import {
   findEpisodeDownload,
   getDownloadProgress,
+  isEpisodeAvailable,
   isEpisodeSelected,
 } from '@app/utils/episodeSelection';
-import { MediaStatus } from '@server/constants/media';
 import type { DownloadingItem } from '@server/lib/downloadtracker';
 import type { SeasonWithEpisodes } from '@server/models/Tv';
 import { useIntl } from 'react-intl';
@@ -39,15 +41,16 @@ const Season = ({
   onToggleEpisode,
 }: SeasonProps) => {
   const intl = useIntl();
-  const { data, error } = useSWR<SeasonWithEpisodes>(
+  const { data, error, isValidating } = useSWR<SeasonWithEpisodes>(
     `/api/v1/tv/${tvId}/season/${seasonNumber}${is4k ? '?is4k=true' : ''}`,
     {
       revalidateOnMount: true,
       refreshInterval: 15000,
+      dedupingInterval: 0,
     }
   );
 
-  if (!data && !error) {
+  if (isValidating || (!data && !error)) {
     return <LoadingSpinner />;
   }
 
@@ -68,9 +71,7 @@ const Season = ({
               episode.episodeNumber
             );
             const requested = !!episode.status?.requested;
-            const available =
-              data.status === MediaStatus.AVAILABLE ||
-              !!episode.status?.available;
+            const available = isEpisodeAvailable(episode, data.status);
             const downloadItem = findEpisodeDownload(
               downloadItems,
               seasonNumber,
@@ -117,6 +118,16 @@ const Season = ({
                     </h3>
                     {episode.airDate && (
                       <AirDateBadge airDate={episode.airDate} />
+                    )}
+                    {available && (
+                      <Badge badgeType="success">
+                        {intl.formatMessage(globalMessages.available)}
+                      </Badge>
+                    )}
+                    {requested && !available && (
+                      <Badge badgeType="warning">
+                        {intl.formatMessage(globalMessages.requested)}
+                      </Badge>
                     )}
                     {downloadProgress !== undefined && (
                       <div

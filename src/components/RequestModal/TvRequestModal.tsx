@@ -15,6 +15,7 @@ import {
   findEpisodeDownload,
   getDownloadProgress,
   getRecentEpisodeNumbers,
+  isEpisodeAvailable,
   isEpisodeSelected,
   serializeSeasonEpisodes,
   type SeasonEpisodeSelection,
@@ -131,15 +132,16 @@ const EpisodeSelection = ({
   onToggle,
 }: EpisodeSelectionProps) => {
   const intl = useIntl();
-  const { data } = useSWR<SeasonWithEpisodes>(
+  const { data, isValidating } = useSWR<SeasonWithEpisodes>(
     `/api/v1/tv/${tmdbId}/season/${seasonNumber}?is4k=${is4k}`,
     {
       revalidateOnMount: true,
       refreshInterval: 15000,
+      dedupingInterval: 0,
     }
   );
 
-  if (!data) {
+  if (isValidating || !data) {
     return <div className="py-3 text-sm text-gray-400">Loading episodes…</div>;
   }
 
@@ -153,8 +155,7 @@ const EpisodeSelection = ({
         const selectedInRequest =
           allSelected || selectedEpisodeNumbers.includes(episode.episodeNumber);
         const requested = !!episode.status?.requested;
-        const available =
-          data.status === MediaStatus.AVAILABLE || !!episode.status?.available;
+        const available = isEpisodeAvailable(episode, data.status);
         const downloadItem = findEpisodeDownload(
           downloadItems,
           seasonNumber,
@@ -202,6 +203,16 @@ const EpisodeSelection = ({
               {finaleMessage && (
                 <Badge badgeType="light">
                   {intl.formatMessage(finaleMessage)}
+                </Badge>
+              )}
+              {available && (
+                <Badge badgeType="success">
+                  {intl.formatMessage(globalMessages.available)}
+                </Badge>
+              )}
+              {requested && !available && (
+                <Badge badgeType="warning">
+                  {intl.formatMessage(globalMessages.requested)}
                 </Badge>
               )}
               {downloadProgress !== undefined && (
@@ -925,7 +936,42 @@ const TvRequestModal = ({
                         <Disclosure as={Fragment} key={`season-${season.id}`}>
                           {({ open, close }) => (
                             <>
-                              <tr>
+                              <DisclosureButton
+                                as="tr"
+                                disabled={
+                                  !settings.currentSettings
+                                    .partialRequestsEnabled
+                                }
+                                onClick={(event) =>
+                                  toggleSeasonDisclosure(
+                                    season.seasonNumber,
+                                    open,
+                                    close,
+                                    event.currentTarget
+                                  )
+                                }
+                                role="button"
+                                tabIndex={0}
+                                aria-label={intl.formatMessage(
+                                  messages.expandSeason,
+                                  {
+                                    season:
+                                      season.seasonNumber === 0
+                                        ? intl.formatMessage(
+                                            globalMessages.specials
+                                          )
+                                        : intl.formatMessage(
+                                            messages.seasonnumber,
+                                            { number: season.seasonNumber }
+                                          ),
+                                  }
+                                )}
+                                className={`cursor-pointer border-gray-700 bg-gray-800 text-gray-200 ${
+                                  open
+                                    ? 'rounded-t-md border-l border-r border-t'
+                                    : 'rounded-md border'
+                                }`}
+                              >
                                 <td
                                   className={`whitespace-nowrap px-4 py-4 text-sm font-medium leading-5 text-gray-100 ${
                                     !settings.currentSettings
@@ -938,14 +984,17 @@ const TvRequestModal = ({
                                     aria-checked={
                                       seasonBlocked || seasonSelected
                                     }
-                                    onClick={() =>
-                                      toggleSeason(season.seasonNumber)
-                                    }
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      toggleSeason(season.seasonNumber);
+                                    }}
                                     onKeyDown={(e) => {
                                       if (
                                         e.key === 'Enter' ||
-                                        e.key === 'Space'
+                                        e.key === 'Space' ||
+                                        e.key === ' '
                                       ) {
+                                        e.stopPropagation();
                                         toggleSeason(season.seasonNumber);
                                       }
                                     }}
@@ -1040,46 +1089,19 @@ const TvRequestModal = ({
                                         </Badge>
                                       )}
                                     </div>
-                                    <DisclosureButton
-                                      disabled={
-                                        !settings.currentSettings
-                                          .partialRequestsEnabled
-                                      }
-                                      onClick={(event) =>
-                                        toggleSeasonDisclosure(
-                                          season.seasonNumber,
-                                          open,
-                                          close,
-                                          event.currentTarget
-                                        )
-                                      }
-                                      className="ml-auto flex shrink-0 items-center rounded p-1 text-left text-gray-500 transition-colors hover:text-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:cursor-default"
-                                      aria-label={intl.formatMessage(
-                                        messages.expandSeason,
-                                        {
-                                          season:
-                                            season.seasonNumber === 0
-                                              ? intl.formatMessage(
-                                                  globalMessages.specials
-                                                )
-                                              : intl.formatMessage(
-                                                  messages.seasonnumber,
-                                                  {
-                                                    number: season.seasonNumber,
-                                                  }
-                                                ),
-                                        }
-                                      )}
+                                    <span
+                                      aria-hidden="true"
+                                      className="ml-auto flex shrink-0 items-center rounded p-1 text-gray-500"
                                     >
                                       <ChevronDownIcon
                                         className={`h-5 w-5 transition-transform duration-200 ease-in-out motion-reduce:transition-none ${
                                           open ? 'rotate-180' : ''
                                         }`}
                                       />
-                                    </DisclosureButton>
+                                    </span>
                                   </div>
                                 </td>
-                              </tr>
+                              </DisclosureButton>
                               <DisclosurePanel
                                 as="tr"
                                 transition

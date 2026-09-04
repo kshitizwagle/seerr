@@ -1,3 +1,4 @@
+import { MediaStatus } from '@server/constants/media';
 import type { DownloadingItem } from '@server/lib/downloadtracker';
 import type { Episode } from '@server/models/Tv';
 
@@ -5,6 +6,12 @@ export type SeasonEpisodeSelection = {
   seasonNumber: number;
   episodeNumbers: number[];
 };
+
+export const isEpisodeAvailable = (
+  episode: Pick<Episode, 'status'>,
+  seasonStatus?: MediaStatus
+): boolean =>
+  episode.status?.available ?? seasonStatus === MediaStatus.AVAILABLE;
 
 export const isEpisodeSelected = ({
   episodeNumber,

@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { MediaStatus } from '@server/constants/media';
+import type { Episode } from '@server/models/Tv';
 import {
   findEpisodeDownload,
   getDownloadProgress,
   getRecentEpisodeNumbers,
+  isEpisodeAvailable,
   isEpisodeSelected,
   serializeSeasonEpisodes,
 } from './episodeSelection';
@@ -32,6 +35,17 @@ describe('episode selection helpers', () => {
       { seasonNumber: 1, episodeNumbers: [3] },
       { seasonNumber: 2, episodeNumbers: [1, 4] },
     ]);
+  });
+
+  it('prefers explicit episode unavailability over an available season', () => {
+    const episode = {
+      status: { requested: false, available: false, monitored: false },
+    } as Episode;
+
+    assert.strictEqual(
+      isEpisodeAvailable(episode, MediaStatus.AVAILABLE),
+      false
+    );
   });
 
   it('marks episodes from an existing request as selected', () => {
