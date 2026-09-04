@@ -91,3 +91,5 @@ devenv.local.yaml
 
 # pre-commit
 .pre-commit-config.yaml
+# Added by code-review-graph
+.code-review-graph/
