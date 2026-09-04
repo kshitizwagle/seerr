@@ -73,7 +73,8 @@ export type EpisodeStatusSelection = {
 export type SonarrEpisodeStatus = {
   seasonNumber: number;
   episodeNumber: number;
-  hasFile: boolean;
+  episodeFileId?: number;
+  hasFile?: boolean;
   finaleType?: string;
   monitored: boolean;
 };
@@ -195,7 +196,9 @@ export const mapEpisodeStatuses = (
             (selection.episodeNumbers == null ||
               selection.episodeNumbers.includes(episode.episodeNumber))
         ),
-        available: sonarrEpisode?.hasFile ?? false,
+        available:
+          sonarrEpisode?.hasFile === true ||
+          (sonarrEpisode?.episodeFileId ?? 0) > 0,
         monitored: sonarrEpisode?.monitored ?? false,
       },
     };

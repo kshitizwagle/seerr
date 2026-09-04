@@ -65,4 +65,22 @@ describe('mapEpisodeStatuses', () => {
 
     assert.ok(result.every((episode) => episode.status?.requested));
   });
+
+  it('treats an episode file id as available', () => {
+    const result = mapEpisodeStatuses(
+      episodes,
+      [
+        {
+          seasonNumber: 1,
+          episodeNumber: 1,
+          episodeFileId: 842,
+          hasFile: false,
+          monitored: false,
+        },
+      ],
+      []
+    );
+
+    assert.strictEqual(result[0].status?.available, true);
+  });
 });

@@ -12,6 +12,8 @@ import { useUser } from '@app/hooks/useUser';
 import globalMessages from '@app/i18n/globalMessages';
 import defineMessages from '@app/utils/defineMessages';
 import {
+  findEpisodeDownload,
+  getDownloadProgress,
   getRecentEpisodeNumbers,
   isEpisodeSelected,
   serializeSeasonEpisodes,
@@ -29,6 +31,7 @@ import type { MediaRequest } from '@server/entity/MediaRequest';
 import type SeasonRequest from '@server/entity/SeasonRequest';
 import type { NonFunctionProperties } from '@server/interfaces/api/common';
 import type { QuotaResponse } from '@server/interfaces/api/userInterfaces';
+import type { DownloadingItem } from '@server/lib/downloadtracker';
 import { Permission } from '@server/lib/permissions';
 import type { SeasonWithEpisodes, TvDetails } from '@server/models/Tv';
 import axios from 'axios';
@@ -69,6 +72,7 @@ const messages = defineMessages('components.RequestModal', {
   midSeasonFinale: 'Mid-Season Finale',
   seasonFinale: 'Season Finale',
   seriesFinale: 'Series Finale',
+  downloadProgress: 'Download progress: {progress}%',
 });
 
 interface RequestModalProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -113,6 +117,7 @@ interface EpisodeSelectionProps {
   is4k: boolean;
   selectedEpisodeNumbers: number[];
   allSelected: boolean;
+  downloadItems: DownloadingItem[];
   onToggle: (episodeNumber: number, allEpisodeNumbers: number[]) => void;
 }
 
@@ -122,6 +127,7 @@ const EpisodeSelection = ({
   is4k,
   selectedEpisodeNumbers,
   allSelected,
+  downloadItems,
   onToggle,
 }: EpisodeSelectionProps) => {
   const intl = useIntl();
@@ -147,17 +153,28 @@ const EpisodeSelection = ({
         const selectedInRequest =
           allSelected || selectedEpisodeNumbers.includes(episode.episodeNumber);
         const requested = !!episode.status?.requested;
+        const available =
+          data.status === MediaStatus.AVAILABLE || !!episode.status?.available;
+        const downloadItem = findEpisodeDownload(
+          downloadItems,
+          seasonNumber,
+          episode.episodeNumber
+        );
+        const downloading = !!downloadItem;
         const selected = isEpisodeSelected({
           episodeNumber: episode.episodeNumber,
           selectedEpisodeNumbers,
           allSelected,
           requested,
+          available,
+          downloading,
         });
         const finaleMessage = getFinaleMessage(episode.finaleType);
         const unavailable =
-          data.status === MediaStatus.AVAILABLE ||
-          !!episode.status?.available ||
-          (requested && !selectedInRequest);
+          available || downloading || (requested && !selectedInRequest);
+        const downloadProgress = downloadItem
+          ? getDownloadProgress(downloadItem)
+          : undefined;
 
         return (
           <label
@@ -187,15 +204,27 @@ const EpisodeSelection = ({
                   {intl.formatMessage(finaleMessage)}
                 </Badge>
               )}
-              {episode.status?.available && (
-                <Badge badgeType="success">
-                  {intl.formatMessage(globalMessages.available)}
-                </Badge>
-              )}
-              {episode.status?.requested && !episode.status.available && (
-                <Badge badgeType="warning">
-                  {intl.formatMessage(globalMessages.requested)}
-                </Badge>
+              {downloadProgress !== undefined && (
+                <div
+                  className="flex w-24 items-center gap-1"
+                  role="progressbar"
+                  aria-label={intl.formatMessage(messages.downloadProgress, {
+                    progress: downloadProgress,
+                  })}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={downloadProgress}
+                >
+                  <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-gray-700">
+                    <div
+                      className="h-full rounded-full bg-indigo-500 transition-[width] duration-300 ease-out"
+                      style={{ width: `${downloadProgress}%` }}
+                    />
+                  </div>
+                  <span className="text-xs text-gray-400">
+                    {downloadProgress}%
+                  </span>
+                </div>
               )}
             </div>
           </label>
@@ -221,6 +250,7 @@ const TvRequestModal = ({
   );
   const { data, error } = useSWR<TvDetails>(`/api/v1/tv/${tmdbId}`, {
     revalidateOnMount: true,
+    refreshInterval: 15000,
   });
   const [requestOverrides, setRequestOverrides] =
     useState<RequestOverrides | null>(null);
@@ -1060,6 +1090,13 @@ const TvRequestModal = ({
                                     tmdbId={tmdbId}
                                     seasonNumber={season.seasonNumber}
                                     is4k={is4k}
+                                    downloadItems={
+                                      data.mediaInfo?.[
+                                        is4k
+                                          ? 'downloadStatus4k'
+                                          : 'downloadStatus'
+                                      ] ?? []
+                                    }
                                     selectedEpisodeNumbers={
                                       selectedEpisodes[season.seasonNumber] ??
                                       []
