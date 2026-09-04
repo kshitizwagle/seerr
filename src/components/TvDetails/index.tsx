@@ -1136,6 +1136,9 @@ const TvDetails = ({ tv }: TvDetailsProps) => {
                               tvId={data.id}
                               seasonNumber={season.seasonNumber}
                               selectable={canSelectEpisodes}
+                              downloadItems={
+                                data.mediaInfo?.downloadStatus ?? []
+                              }
                               selectedEpisodeNumbers={
                                 selectedEpisodes[season.seasonNumber] ?? []
                               }

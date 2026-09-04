@@ -1,11 +1,14 @@
 import AirDateBadge from '@app/components/AirDateBadge';
-import Badge from '@app/components/Common/Badge';
 import CachedImage from '@app/components/Common/CachedImage';
 import LoadingSpinner from '@app/components/Common/LoadingSpinner';
-import globalMessages from '@app/i18n/globalMessages';
 import defineMessages from '@app/utils/defineMessages';
-import { isEpisodeSelected } from '@app/utils/episodeSelection';
+import {
+  findEpisodeDownload,
+  getDownloadProgress,
+  isEpisodeSelected,
+} from '@app/utils/episodeSelection';
 import { MediaStatus } from '@server/constants/media';
+import type { DownloadingItem } from '@server/lib/downloadtracker';
 import type { SeasonWithEpisodes } from '@server/models/Tv';
 import { useIntl } from 'react-intl';
 import useSWR from 'swr';
@@ -13,7 +16,7 @@ import useSWR from 'swr';
 const messages = defineMessages('components.TvDetails.Season', {
   somethingwentwrong: 'Something went wrong while retrieving season data.',
   noepisodes: 'Episode list unavailable.',
-  monitored: 'Monitored',
+  downloadProgress: 'Download progress: {progress}%',
 });
 
 type SeasonProps = {
@@ -22,6 +25,7 @@ type SeasonProps = {
   is4k?: boolean;
   selectable?: boolean;
   selectedEpisodeNumbers?: number[];
+  downloadItems?: DownloadingItem[];
   onToggleEpisode?: (episodeNumber: number) => void;
 };
 
@@ -31,6 +35,7 @@ const Season = ({
   is4k = false,
   selectable = false,
   selectedEpisodeNumbers = [],
+  downloadItems = [],
   onToggleEpisode,
 }: SeasonProps) => {
   const intl = useIntl();
@@ -63,16 +68,28 @@ const Season = ({
               episode.episodeNumber
             );
             const requested = !!episode.status?.requested;
+            const available =
+              data.status === MediaStatus.AVAILABLE ||
+              !!episode.status?.available;
+            const downloadItem = findEpisodeDownload(
+              downloadItems,
+              seasonNumber,
+              episode.episodeNumber
+            );
+            const downloading = !!downloadItem;
             const selected = isEpisodeSelected({
               episodeNumber: episode.episodeNumber,
               selectedEpisodeNumbers,
               allSelected: false,
               requested,
+              available,
+              downloading,
             });
             const unavailable =
-              data.status === MediaStatus.AVAILABLE ||
-              !!episode.status?.available ||
-              (requested && !selectedInRequest);
+              available || downloading || (requested && !selectedInRequest);
+            const downloadProgress = downloadItem
+              ? getDownloadProgress(downloadItem)
+              : undefined;
 
             return (
               <div
@@ -101,23 +118,31 @@ const Season = ({
                     {episode.airDate && (
                       <AirDateBadge airDate={episode.airDate} />
                     )}
-                    {episode.status?.available && (
-                      <Badge badgeType="success">
-                        {intl.formatMessage(globalMessages.available)}
-                      </Badge>
+                    {downloadProgress !== undefined && (
+                      <div
+                        className="flex w-24 items-center gap-1"
+                        role="progressbar"
+                        aria-label={intl.formatMessage(
+                          messages.downloadProgress,
+                          {
+                            progress: downloadProgress,
+                          }
+                        )}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={downloadProgress}
+                      >
+                        <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-gray-700">
+                          <div
+                            className="h-full rounded-full bg-indigo-500 transition-[width] duration-300 ease-out"
+                            style={{ width: `${downloadProgress}%` }}
+                          />
+                        </div>
+                        <span className="text-xs text-gray-400">
+                          {downloadProgress}%
+                        </span>
+                      </div>
                     )}
-                    {episode.status?.requested && !episode.status.available && (
-                      <Badge badgeType="warning">
-                        {intl.formatMessage(globalMessages.requested)}
-                      </Badge>
-                    )}
-                    {episode.status?.monitored &&
-                      !episode.status.available &&
-                      !episode.status.requested && (
-                        <Badge badgeType="primary">
-                          {intl.formatMessage(messages.monitored)}
-                        </Badge>
-                      )}
                   </div>
                   {episode.overview && <p>{episode.overview}</p>}
                 </div>
