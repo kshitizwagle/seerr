@@ -65,7 +65,20 @@ jobs:
           name: release-changelog
 
       - name: Draft Release
-        run: gh release create ${GITHUB_REF_NAME} -t "Release ${GITHUB_REF_NAME}" --notes-file CHANGELOG.md --draft
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Release $GITHUB_REF_NAME" \
+              --notes-file CHANGELOG.md \
+              --draft
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Release $GITHUB_REF_NAME" \
+              --notes-file CHANGELOG.md \
+              --draft
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
